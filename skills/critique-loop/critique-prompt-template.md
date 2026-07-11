@@ -50,7 +50,7 @@ nothing blocks the criteria, say so plainly.
 
 ## Template P — plan critique
 
-```
+````
 You are the CRITIC in a critique loop, reviewing a PLAN before any implementation
 exists. Do NOT modify any files — output a critique only.
 
@@ -77,11 +77,11 @@ Critique like a rigorous senior reviewer at the highest scrutiny. Probe for:
 - open questions the author should not decide alone → mark [needs-human]
 
 <shared findings format + shared verdict block>
-```
+````
 
 ## Template I — implementation critique
 
-```
+````
 The plan you reviewed is now implemented (the user approved the plan first).
 Do NOT modify any files — output a critique only.
 
@@ -105,11 +105,11 @@ Verify, in priority order:
 (d) tests cover the changes adequately.
 
 <shared findings format + shared verdict block>
-```
+````
 
 ## Template R — re-review (session-aware follow-up)
 
-```
+````
 Round <K> of 16 in this loop. I addressed your last critique. Since your previous pass:
 <bullets — one per finding: what I changed, or why I pushed back / left it (disputed);
  plus any task/criteria amendment from the user, verbatim>
@@ -121,11 +121,11 @@ Note which of your prior findings are resolved and which remain open — do not 
 resolved or explicitly disputed items unless still clearly present. Raise anything new.
 
 Same output format as before, end with the `=== VERDICT ===` block.
-```
+````
 
 ## Template D — direct critique (direct mode, first call)
 
-```
+````
 You are the CRITIC in a critique loop. Do NOT modify any files — output a critique only.
 
 ## Task under review
@@ -156,4 +156,4 @@ correctness and completeness against the task, then anything that blocks the
 convergence criteria.
 
 <shared findings format + shared verdict block>
-```
+````
