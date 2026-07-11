@@ -1,0 +1,408 @@
+<!--
+  critique_loop dashboard — body-only (Artifact-ready) and also openable locally in a browser.
+  Claude: overwrite the RUN object below with the real run's data, then either publish via the
+  Artifact tool (hosted URL) or `open` the file locally. Ships with sample data as a live demo.
+-->
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  :root{
+    --bg:#eef1f6; --surface:#ffffff; --surface-2:#f4f6fa; --border:#dce1ea;
+    --text:#151a22; --muted:#5b6474; --faint:#8a93a3;
+    --accent:#0d9488; --accent-2:#0f766e;
+    --sev-blocking:#dc3f45; --sev-major:#e07610; --sev-minor:#c39508; --sev-nit:#8b93a3;
+    --ok:#2f9e63; --warn:#d98014; --crit:#dc3f45;
+    --shadow:0 1px 2px rgba(16,20,30,.05), 0 6px 22px rgba(16,20,30,.06);
+    --mono:ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans:system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0b0e14; --surface:#141922; --surface-2:#1a2028; --border:#28303c;
+      --text:#e7eaf0; --muted:#98a1b1; --faint:#6b7484;
+      --accent:#2dd4bf; --accent-2:#5eead4;
+      --sev-blocking:#ff5c62; --sev-major:#ff9d4d; --sev-minor:#e8c53d; --sev-nit:#8b93a3;
+      --ok:#46d18a; --warn:#f0a83c; --crit:#ff5c62;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 28px rgba(0,0,0,.38);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#eef1f6; --surface:#ffffff; --surface-2:#f4f6fa; --border:#dce1ea;
+    --text:#151a22; --muted:#5b6474; --faint:#8a93a3;
+    --accent:#0d9488; --accent-2:#0f766e;
+    --sev-blocking:#dc3f45; --sev-major:#e07610; --sev-minor:#c39508; --sev-nit:#8b93a3;
+    --ok:#2f9e63; --warn:#d98014; --crit:#dc3f45;
+    --shadow:0 1px 2px rgba(16,20,30,.05), 0 6px 22px rgba(16,20,30,.06);
+  }
+  :root[data-theme="dark"]{
+    --bg:#0b0e14; --surface:#141922; --surface-2:#1a2028; --border:#28303c;
+    --text:#e7eaf0; --muted:#98a1b1; --faint:#6b7484;
+    --accent:#2dd4bf; --accent-2:#5eead4;
+    --sev-blocking:#ff5c62; --sev-major:#ff9d4d; --sev-minor:#e8c53d; --sev-nit:#8b93a3;
+    --ok:#46d18a; --warn:#f0a83c; --crit:#ff5c62;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 28px rgba(0,0,0,.38);
+  }
+
+  body{ margin:0; background:var(--bg); color:var(--text); font-family:var(--sans);
+        line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .wrap{ max-width:940px; margin:0 auto; padding:32px 22px 56px; }
+  @media (prefers-reduced-motion:no-preference){
+    .wrap{ animation:rise .5s cubic-bezier(.2,.7,.2,1) both; }
+    @keyframes rise{ from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:none} }
+  }
+
+  .top{ display:flex; justify-content:space-between; align-items:flex-start; gap:18px;
+        flex-wrap:wrap; padding-bottom:18px; border-bottom:1px solid var(--border); }
+  .mark{ font-family:var(--mono); font-size:13px; font-weight:700; letter-spacing:.22em;
+         color:var(--accent); margin:0 0 6px; }
+  .task{ font-size:20px; font-weight:640; letter-spacing:-.01em; text-wrap:balance; max-width:60ch; }
+  .prov{ font-family:var(--mono); font-size:11.5px; color:var(--muted); background:var(--surface-2);
+         border:1px solid var(--border); border-radius:8px; padding:8px 11px; white-space:nowrap;
+         box-shadow:var(--shadow); }
+  .prov b{ color:var(--text); font-weight:600; }
+
+  .right{ display:flex; flex-direction:column; align-items:flex-end; gap:10px; }
+  .ident{ display:flex; align-items:center; gap:11px; background:var(--surface);
+          border:1px solid var(--border); border-radius:40px; padding:6px 15px 6px 6px;
+          box-shadow:var(--shadow); }
+  .avatar{ position:relative; width:46px; height:46px; border-radius:50%; overflow:hidden;
+           flex:none; border:2px solid var(--accent);
+           box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+  @media (prefers-reduced-motion:no-preference){
+    .avatar{ animation:halo 3.4s ease-in-out infinite; }
+    @keyframes halo{
+      0%,100%{ box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent); }
+      50%{ box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 7%,transparent); } }
+  }
+  .avatar svg{ display:block; width:100%; height:100%; }
+  .live{ position:absolute; right:1px; bottom:1px; width:11px; height:11px; border-radius:50%;
+         background:var(--ok); border:2px solid var(--surface); }
+  .ident-txt{ display:flex; flex-direction:column; line-height:1.18; }
+  .nick{ font-family:var(--mono); font-weight:700; font-size:14px; letter-spacing:.02em; color:var(--text); }
+  .nick-tag{ font-family:var(--mono); font-size:9.5px; text-transform:uppercase; letter-spacing:.13em;
+             color:var(--faint); }
+
+  .banner{ margin:18px 0 4px; padding:13px 16px; border-radius:11px; font-size:14px;
+           border:1px solid; display:flex; gap:10px; align-items:baseline; }
+  .banner .dot{ width:9px; height:9px; border-radius:50%; flex:none; transform:translateY(1px); }
+  .banner.ok{ background:color-mix(in srgb, var(--ok) 12%, var(--surface));
+              border-color:color-mix(in srgb, var(--ok) 40%, var(--border)); }
+  .banner.ok .dot{ background:var(--ok); }
+  .banner.warn{ background:color-mix(in srgb, var(--warn) 13%, var(--surface));
+                border-color:color-mix(in srgb, var(--warn) 42%, var(--border)); }
+  .banner.warn .dot{ background:var(--warn); }
+  .banner.crit{ background:color-mix(in srgb, var(--crit) 13%, var(--surface));
+                border-color:color-mix(in srgb, var(--crit) 42%, var(--border)); }
+  .banner.crit .dot{ background:var(--crit); }
+  .banner b{ font-weight:680; }
+  .banner .crit-text{ color:var(--muted); }
+
+  .amend{ display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 4px; }
+  .amend-chip{ font-family:var(--mono); font-size:11.5px; color:var(--muted);
+               background:var(--surface); border:1px dashed var(--border); border-radius:7px;
+               padding:5px 9px; }
+  .amend-chip b{ color:var(--accent); }
+
+  .kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:20px 0; }
+  @media (max-width:640px){ .kpis{ grid-template-columns:repeat(2,1fr); } }
+  .kpi{ background:var(--surface); border:1px solid var(--border); border-radius:12px;
+        padding:14px 15px; box-shadow:var(--shadow); }
+  .kpi .label{ font-size:11px; text-transform:uppercase; letter-spacing:.09em; color:var(--muted); }
+  .kpi .val{ font-family:var(--mono); font-size:26px; font-weight:680; margin-top:5px;
+             font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+  .kpi .sub{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .kpi .val.ok{ color:var(--ok); } .kpi .val.crit{ color:var(--crit); } .kpi .val.warn{ color:var(--warn); }
+
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:14px;
+         padding:18px 18px 16px; box-shadow:var(--shadow); margin-bottom:18px; }
+  .card-h{ display:flex; justify-content:space-between; align-items:center; gap:12px;
+           margin-bottom:12px; flex-wrap:wrap; }
+  .card-h h2{ font-size:13px; font-weight:660; letter-spacing:.02em; margin:0; }
+  .legend{ display:flex; gap:13px; flex-wrap:wrap; font-family:var(--mono); font-size:11px; color:var(--muted); }
+  .legend .item{ display:flex; align-items:center; gap:5px; }
+  .swatch{ width:10px; height:10px; border-radius:3px; }
+
+  .chart-scroll{ overflow-x:auto; }
+  .cap{ font-size:12.5px; color:var(--muted); margin:12px 2px 0; }
+  .cap b{ color:var(--text); font-weight:600; }
+
+  svg .grid{ stroke:var(--border); stroke-width:1; opacity:.6; }
+  svg .axis{ stroke:var(--faint); stroke-width:1; }
+  svg .ytick{ fill:var(--faint); font:11px var(--mono); text-anchor:end; }
+  svg .xtick{ fill:var(--muted); font:12px var(--mono); text-anchor:middle; }
+  svg .xtick.conv{ fill:var(--ok); font-weight:700; }
+  svg .total{ fill:var(--muted); font:600 11px var(--mono); text-anchor:middle; }
+  svg .total.zero{ fill:var(--ok); }
+  svg .conv-mark{ fill:var(--ok); font:12px var(--sans); text-anchor:middle; }
+  svg .amend-mark{ fill:var(--accent); font:11px var(--sans); text-anchor:middle; }
+  svg .axis-title{ fill:var(--faint); font:11px var(--mono); text-anchor:middle; }
+
+  .table-scroll{ overflow-x:auto; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; min-width:560px; }
+  th{ text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.07em;
+      color:var(--muted); font-weight:600; padding:0 10px 8px; border-bottom:1px solid var(--border); }
+  td{ padding:10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  tr:last-child td{ border-bottom:0; }
+  td.loc{ font-family:var(--mono); font-size:12px; color:var(--muted); white-space:nowrap; }
+  td.it{ font-family:var(--mono); color:var(--faint); text-align:center; }
+
+  .pill{ display:inline-block; font-family:var(--mono); font-size:11px; font-weight:600;
+         padding:2px 8px; border-radius:999px; border:1px solid; white-space:nowrap; }
+  .pill.blocking{ color:var(--sev-blocking); background:color-mix(in srgb,var(--sev-blocking) 15%,transparent);
+                  border-color:color-mix(in srgb,var(--sev-blocking) 35%,transparent); }
+  .pill.major{ color:var(--sev-major); background:color-mix(in srgb,var(--sev-major) 15%,transparent);
+               border-color:color-mix(in srgb,var(--sev-major) 35%,transparent); }
+  .pill.minor{ color:var(--sev-minor); background:color-mix(in srgb,var(--sev-minor) 15%,transparent);
+               border-color:color-mix(in srgb,var(--sev-minor) 35%,transparent); }
+  .pill.nit{ color:var(--sev-nit); background:color-mix(in srgb,var(--sev-nit) 15%,transparent);
+             border-color:color-mix(in srgb,var(--sev-nit) 35%,transparent); }
+  .chip{ display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:6px; }
+  .chip.fixed{ color:var(--ok); background:color-mix(in srgb,var(--ok) 14%,transparent); }
+  .chip.disputed{ color:var(--warn); background:color-mix(in srgb,var(--warn) 15%,transparent); }
+  .chip.oscillated{ color:var(--accent); background:color-mix(in srgb,var(--accent) 15%,transparent); }
+  .chip.open{ color:var(--muted); background:var(--surface-2); }
+  .chip.user-decided{ color:var(--accent-2); background:color-mix(in srgb,var(--accent) 15%,transparent); }
+  .issue-note{ color:var(--faint); font-size:12px; margin-top:3px; }
+  .gate-line{ stroke:var(--accent); stroke-width:1.5; stroke-dasharray:4 4; opacity:.8; }
+  .gate-label{ fill:var(--accent); font:600 10px var(--mono); text-anchor:middle; }
+
+  .foot{ font-family:var(--mono); font-size:11.5px; color:var(--faint); margin-top:26px;
+         padding-top:16px; border-top:1px solid var(--border); display:flex;
+         justify-content:space-between; gap:12px; flex-wrap:wrap; }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1 class="mark">CRITIQUE · LOOP</h1>
+      <div class="task" id="task"></div>
+    </div>
+    <div class="right">
+      <div class="ident" title="vmt29 — custom personal handle, not an official identifier">
+        <span class="avatar">
+          <svg viewBox="0 0 120 120" role="img" aria-label="Sketched avatar of vmt29">
+            <rect width="120" height="120" fill="#eef1f6"/>
+            <g opacity="0.75">
+              <rect x="6" y="12" width="30" height="108" rx="4" fill="#d9e0ea"/>
+              <rect x="12" y="22" width="18" height="42" rx="2" fill="#eef2f8"/>
+              <rect x="84" y="12" width="30" height="108" rx="4" fill="#d9e0ea"/>
+              <rect x="90" y="22" width="18" height="42" rx="2" fill="#eef2f8"/>
+            </g>
+            <path d="M14 120 C 17 98, 39 89, 60 89 C 81 89, 103 98, 106 120 Z" fill="#6d7480"/>
+            <path d="M52 90 L60 103 L68 90 Z" fill="#e4ae89"/>
+            <rect x="51" y="78" width="18" height="16" rx="6" fill="#e0aa85"/>
+            <path d="M35 53 C 35 33, 45 26, 60 26 C 75 26, 85 33, 85 53 C 85 71, 74 85, 60 85 C 46 85, 35 71, 35 53 Z" fill="#eab896"/>
+            <ellipse cx="35" cy="58" rx="4.2" ry="6" fill="#e0aa85"/>
+            <ellipse cx="85" cy="58" rx="4.2" ry="6" fill="#e0aa85"/>
+            <path d="M31 60 C 27 31, 44 17, 60 17 C 76 17, 93 31, 89 60 C 88 49, 84 43, 80 41 C 78 34, 69 30, 60 30 C 51 30, 42 34, 40 41 C 36 43, 32 49, 31 60 Z" fill="#3b2b22"/>
+            <g fill="#3b2b22">
+              <circle cx="41" cy="27" r="9"/><circle cx="52" cy="21" r="9"/><circle cx="63" cy="19" r="9"/>
+              <circle cx="74" cy="22" r="9"/><circle cx="83" cy="30" r="8"/><circle cx="87" cy="41" r="7"/>
+              <circle cx="33" cy="41" r="7"/><circle cx="31" cy="52" r="6.5"/><circle cx="89" cy="52" r="6.5"/>
+              <circle cx="45" cy="35" r="5"/><circle cx="54" cy="32" r="5"/><circle cx="63" cy="31" r="5"/>
+              <circle cx="72" cy="33" r="5"/><circle cx="79" cy="37" r="5"/>
+            </g>
+            <g fill="#523a2f">
+              <circle cx="49" cy="24" r="3"/><circle cx="68" cy="23" r="3"/><circle cx="80" cy="35" r="2.6"/>
+            </g>
+            <path d="M43 49 Q49 46 55 48" stroke="#3b2b22" stroke-width="2" fill="none" stroke-linecap="round"/>
+            <path d="M65 48 Q71 46 77 49" stroke="#3b2b22" stroke-width="2" fill="none" stroke-linecap="round"/>
+            <g stroke="#585049" stroke-width="2" fill="#ffffff" fill-opacity="0.14">
+              <circle cx="49" cy="60" r="11"/>
+              <circle cx="71" cy="60" r="11"/>
+            </g>
+            <path d="M58 58 Q60 55 62 58" stroke="#585049" stroke-width="2" fill="none"/>
+            <path d="M38 58 L30 55" stroke="#585049" stroke-width="2" stroke-linecap="round"/>
+            <path d="M82 58 L90 55" stroke="#585049" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="49" cy="60" r="2.6" fill="#33281f"/>
+            <circle cx="71" cy="60" r="2.6" fill="#33281f"/>
+            <circle cx="50" cy="59" r="0.9" fill="#fff"/>
+            <circle cx="72" cy="59" r="0.9" fill="#fff"/>
+            <path d="M60 61 L57.5 70 Q60 72.5 62.5 70" stroke="#d89f7c" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+            <path d="M49 74 Q60 72 71 74 Q66 83 60 83 Q54 83 49 74 Z" fill="#c06f57"/>
+            <path d="M52 75.5 Q60 74.5 68 75.5 Q64 80 60 80 Q56 80 52 75.5 Z" fill="#fbfaf6"/>
+          </svg>
+          <span class="live" title="active"></span>
+        </span>
+        <span class="ident-txt">
+          <span class="nick" id="operator">vmt29</span>
+          <span class="nick-tag" id="operatorTag">custom handle</span>
+        </span>
+      </div>
+      <div class="prov" id="prov"></div>
+    </div>
+  </header>
+
+  <div id="banner"></div>
+  <div class="amend" id="amend"></div>
+  <section class="kpis" id="kpis"></section>
+
+  <section class="card">
+    <div class="card-h"><h2>Convergence trajectory</h2><div class="legend" id="legend"></div></div>
+    <div class="chart-scroll"><div id="chart"></div></div>
+    <p class="cap" id="chartcap"></p>
+  </section>
+
+  <section class="card">
+    <div class="card-h"><h2>Findings log</h2><div class="legend" id="findcount"></div></div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Severity</th><th>Iter</th><th>Location</th><th>Issue</th><th>Resolution</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="foot" id="foot"></footer>
+</div>
+
+<script>
+/* ============================ RUN DATA — Claude overwrites this ============================ */
+const RUN = {
+  task: "Refactor auth token validation to be fully async",
+  criteria: "No blocking or major findings remain, and the test suite passes.",
+  mode: "full",                   // full | direct (optional)
+  codex: { version: "0.142.5", model: "gpt-5.5", effort: "xhigh", session: "019f51ed…a4d3" },
+  operator: "vmt29",              // custom personal handle — NOT an official identifier
+  operatorTag: "custom handle",
+  outcome: "converged",           // converged | stuck | max | timeout
+  convergedAt: 4,
+  maxIterations: 32,              // 16 per loop: 32 in full mode, 16 in direct mode
+  generatedAt: "2026-07-05",
+  gateAfter: 2,                   // full mode: last plan-loop iteration (user approved after it)
+  amendments: [
+    { iter: 2, note: "Added requirement: no sync I/O on the event loop" }
+  ],
+  iterations: [
+    { n:1, phase:"plan", blocking:2, major:3, minor:2, nit:1 },
+    { n:2, phase:"plan", blocking:0, major:2, minor:2, nit:1 },
+    { n:3, phase:"code", blocking:0, major:1, minor:1, nit:0 },
+    { n:4, phase:"code", blocking:0, major:0, minor:1, nit:0 }
+  ],
+  findings: [
+    { severity:"major", iter:1, location:"docs/plans/async-auth.md §3", issue:"Plan leaves token-refresh backoff policy open — product decision.", resolution:"user-decided", note:"User: exponential backoff, cap 60s." },
+    { severity:"blocking", iter:1, location:"auth/token.py:42", issue:"await missing on verify_signature(); the coroutine is never executed.", resolution:"fixed" },
+    { severity:"blocking", iter:1, location:"auth/token.py:71", issue:"synchronous sqlite call blocks the event loop.", resolution:"fixed" },
+    { severity:"major", iter:1, location:"auth/token.py:88", issue:"expired tokens raise instead of returning a 401.", resolution:"fixed" },
+    { severity:"major", iter:2, location:"auth/session.py:19", issue:"race: two concurrent refreshes can mint two tokens.", resolution:"fixed" },
+    { severity:"major", iter:3, location:"auth/token.py:120", issue:"clock-skew leeway hard-coded to 0.", resolution:"disputed", note:"Kept 0 by design; documented — skew handled upstream at the gateway." },
+    { severity:"minor", iter:2, location:"auth/token.py:55", issue:"broad `except Exception` swallows CancelledError.", resolution:"fixed" },
+    { severity:"minor", iter:4, location:"tests/test_auth.py", issue:"no test covers concurrent refresh.", resolution:"open" },
+    { severity:"nit", iter:1, location:"auth/token.py:12", issue:"unused import `hmac`.", resolution:"fixed" }
+  ]
+};
+/* ========================================================================================== */
+
+const SEV = [["blocking","--sev-blocking"],["major","--sev-major"],["minor","--sev-minor"],["nit","--sev-nit"]];
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function render(R){
+  document.getElementById("task").textContent = R.task;
+  document.getElementById("prov").innerHTML =
+    `codex <b>${esc(R.codex.version)}</b> · model <b>${esc(R.codex.model)}</b> · effort <b>${esc(R.codex.effort)}</b>`
+    + (R.codex.session ? ` · session <b>${esc(R.codex.session)}</b>` : "");
+  if(R.operator){ document.getElementById("operator").textContent = R.operator; }
+  if(R.operatorTag){ document.getElementById("operatorTag").textContent = R.operatorTag; }
+
+  // Banner
+  const last = R.iterations[R.iterations.length-1] || {blocking:0,major:0};
+  const bmap = {
+    converged:["ok", `Converged at iteration ${R.convergedAt}`, `criteria met — ${R.criteria}`],
+    stuck:["warn","Stopped early — stuck", `no further progress · ${R.criteria}`],
+    max:["warn",`Hit the ${R.maxIterations}-iteration limit`, `not fully converged · ${R.criteria}`],
+    timeout:["crit","Codex timed out", `loop halted · ${R.criteria}`]
+  }[R.outcome] || ["warn","In progress", R.criteria];
+  document.getElementById("banner").outerHTML =
+    `<div class="banner ${bmap[0]}"><span class="dot"></span><span><b>${esc(bmap[1])}.</b> <span class="crit-text">${esc(bmap[2])}</span></span></div>`;
+
+  // Amendments
+  document.getElementById("amend").innerHTML = (R.amendments||[]).map(a =>
+    `<span class="amend-chip"><b>✎ iter ${a.iter}</b> &nbsp;task/criteria amended — ${esc(a.note)}</span>`).join("");
+
+  // KPIs
+  const fixed = R.findings.filter(f=>f.resolution==="fixed").length;
+  const remain = (last.blocking||0)+(last.major||0);
+  const oc = {converged:"ok",stuck:"warn",max:"warn",timeout:"crit"}[R.outcome]||"";
+  const ocLabel = {converged:"Converged",stuck:"Stuck",max:"Max reached",timeout:"Timed out"}[R.outcome]||R.outcome;
+  document.getElementById("kpis").innerHTML = [
+    `<div class="kpi"><div class="label">Outcome</div><div class="val ${oc}">${esc(ocLabel)}</div><div class="sub">${R.outcome==="converged"?"iteration "+R.convergedAt:"—"}</div></div>`,
+    `<div class="kpi"><div class="label">Iterations</div><div class="val">${R.iterations.length}<span style="color:var(--faint)"> / ${R.maxIterations}</span></div><div class="sub">of ${R.maxIterations} max</div></div>`,
+    `<div class="kpi"><div class="label">Findings fixed</div><div class="val">${fixed}<span style="color:var(--faint)"> / ${R.findings.length}</span></div><div class="sub">applied by Claude</div></div>`,
+    `<div class="kpi"><div class="label">Blocking + major left</div><div class="val ${remain===0?"ok":"crit"}">${remain}</div><div class="sub">at last pass</div></div>`
+  ].join("");
+
+  // Legend
+  document.getElementById("legend").innerHTML = SEV.map(([k,v])=>
+    `<span class="item"><span class="swatch" style="background:var(${v})"></span>${k}</span>`).join("");
+
+  // Chart
+  document.getElementById("chart").innerHTML = buildChart(R);
+  const capMap = {
+    converged:`<b>Blocking</b> cleared by iteration 2; the curve reaches the criteria bar at iteration ${R.convergedAt}.`,
+    stuck:`The finding set stopped shrinking — loop exited early.`,
+    max:`Still descending at the ${R.maxIterations}-iteration cap; residual findings listed below.`,
+    timeout:`A critique pass exceeded the time budget; loop halted.`
+  };
+  document.getElementById("chartcap").innerHTML = capMap[R.outcome]||"";
+
+  // Findings table
+  document.getElementById("findcount").innerHTML =
+    `<span class="item">${R.findings.length} tracked · ${fixed} fixed</span>`;
+  document.getElementById("rows").innerHTML = R.findings.map(f=>
+    `<tr>
+       <td><span class="pill ${f.severity}">${f.severity}</span></td>
+       <td class="it">${f.iter}</td>
+       <td class="loc">${esc(f.location)}</td>
+       <td>${esc(f.issue)}${f.note?`<div class="issue-note">↳ ${esc(f.note)}</div>`:""}</td>
+       <td><span class="chip ${f.resolution}">${f.resolution}</span></td>
+     </tr>`).join("");
+
+  document.getElementById("foot").innerHTML =
+    `<span>✦ signed · <b style="color:var(--accent)">${esc(R.operator||"—")}</b> <span style="opacity:.7">(${esc(R.operatorTag||"custom")})</span> · Codex read-only · Claude fixes${R.mode?` · mode ${esc(R.mode)}`:""}</span>` +
+    `<span>codex ${esc(R.codex.version)} · ${esc(R.codex.model)} · ${esc(R.codex.effort)} · ${esc(R.generatedAt||"")}</span>`;
+}
+
+function buildChart(R){
+  const iters = R.iterations;
+  const totals = iters.map(it=>it.blocking+it.major+it.minor+it.nit);
+  const rawMax = Math.max(1, ...totals);
+  const step = rawMax<=5 ? 1 : rawMax<=10 ? 2 : Math.ceil(rawMax/5);
+  const niceMax = Math.max(step, Math.ceil(rawMax/step)*step);
+  const barW=46, gap=30, left=44, top=22, bottom=42, right=16, H=278;
+  const plotH = H-top-bottom;
+  const W = left + iters.length*(barW+gap) + right;
+  const y = v => top + plotH - (v/niceMax)*plotH;
+  let g = "";
+  for(let v=0; v<=niceMax; v+=step){
+    g += `<line class="grid" x1="${left}" y1="${y(v)}" x2="${W-right}" y2="${y(v)}"/>`;
+    g += `<text class="ytick" x="${left-8}" y="${y(v)+4}">${v}</text>`;
+  }
+  iters.forEach((it,i)=>{
+    const x = left + i*(barW+gap) + gap/2;
+    const conv = R.outcome==="converged" && it.n===R.convergedAt;
+    let baseY = top+plotH;
+    SEV.forEach(([k,v])=>{
+      const val = it[k]; if(val<=0) return;
+      const h = (val/niceMax)*plotH, ry = baseY-h;
+      g += `<rect x="${x}" y="${ry}" width="${barW}" height="${h}" rx="2" style="fill:var(${v})"><title>iter ${it.n} · ${k}: ${val}</title></rect>`;
+      baseY = ry;
+    });
+    const tot = totals[i];
+    g += `<text class="total ${tot===0?"zero":""}" x="${x+barW/2}" y="${baseY-7}">${tot}</text>`;
+    if(conv) g += `<text class="conv-mark" x="${x+barW/2}" y="${baseY-22}">✓ converged</text>`;
+    const ph = it.phase==="plan" ? "P" : it.phase==="code" ? "C" : "";
+    g += `<text class="xtick ${conv?"conv":""}" x="${x+barW/2}" y="${H-bottom+18}">${ph}${it.n}</text>`;
+    const am = (R.amendments||[]).find(a=>a.iter===it.n);
+    if(am) g += `<text class="amend-mark" x="${x+barW/2}" y="${H-bottom+34}"><title>${esc(am.note)}</title>✎ amended</text>`;
+    if(R.gateAfter===it.n){
+      const gx = x + barW + gap/2;
+      g += `<line class="gate-line" x1="${gx}" y1="${top-4}" x2="${gx}" y2="${top+plotH}"/>`;
+      g += `<text class="gate-label" x="${gx}" y="${top-8}">plan ✓</text>`;
+    }
+  });
+  g += `<line class="axis" x1="${left}" y1="${top+plotH}" x2="${W-right}" y2="${top+plotH}"/>`;
+  g += `<text class="axis-title" x="${left+(W-right-left)/2}" y="${H-3}">iteration →</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="min-width:${W}px" role="img" aria-label="Convergence trajectory: stacked severity counts per iteration">${g}</svg>`;
+}
+
+render(RUN);
+</script>
