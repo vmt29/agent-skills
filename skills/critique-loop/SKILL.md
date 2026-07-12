@@ -23,10 +23,10 @@ Two modes, chosen at intake:
   it on the first `exec` call and resumes it on every later call (`session-id` file is
   auto-managed). **Model = the maximal model available to you** — inherits Codex's
   configured default (auto-upgrades when your default does; `CODEX_MODEL=` pins one).
-  **Effort = the maximal tier**, auto-resolved: the higher of your codex-config
-  `model_reasoning_effort` and `xhigh` on the known ladder
-  (`minimal < low < medium < high < xhigh < ultra`); an unrecognized configured tier is
-  trusted as newer-and-higher. `CODEX_EFFORT=` pins one explicitly. Preview what will
+  **Effort = `xhigh` by default** (owner decision 2026-07-12: ultra's marginal
+  critique quality did not justify its wall-clock and cost; the codex config's
+  `model_reasoning_effort` is deliberately not consulted). `CODEX_EFFORT=` pins any
+  tier explicitly (e.g. `ultra` for an especially high-stakes run). Preview what will
   run: `~/.claude/skills/critique-loop/critique-loop-run.sh info`. The helper prints
   and stamps *provenance* (exact CLI version + effective model + effort + session
   state) — always surface it.

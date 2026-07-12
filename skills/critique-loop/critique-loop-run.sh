@@ -11,10 +11,10 @@
 #
 # Model  : inherits Codex's configured default = your maximal available model
 #          (override with CODEX_MODEL=... only if you need to pin a specific one).
-# Effort : the MAXIMAL tier — the higher of your codex-config `model_reasoning_effort`
-#          and `xhigh` on the known ladder minimal<low<medium<high<xhigh<ultra. An
-#          unrecognized configured tier is trusted as newer-and-higher (future tiers).
-#          Override with CODEX_EFFORT=... to pin one explicitly.
+# Effort : DEFAULT = xhigh (deliberate: ultra costs ~2-3x the wall-clock for a thin
+#          quality margin on critique work — owner decision 2026-07-12). The codex
+#          config's `model_reasoning_effort` is NOT consulted. Override with
+#          CODEX_EFFORT=... to pin any tier (e.g. ultra) explicitly.
 #
 # Every run prints a PROVENANCE line — exact Codex CLI version, effective model, effort,
 # and session state — and stamps it into the buffer.
@@ -40,7 +40,7 @@
 # Writes critique to: $CRITIQUE_LOOP_DIR/critique-<iteration>.md
 # Session id file   : $CRITIQUE_LOOP_DIR/session-id (auto-managed; delete to force a new session)
 #
-# Env: CODEX_MODEL (default: unset -> Codex config default) · CODEX_EFFORT (default: resolved max)
+# Env: CODEX_MODEL (default: unset -> Codex config default) · CODEX_EFFORT (default: xhigh)
 #      CRITIQUE_LOOP_DIR (default: /tmp/critique-loop — the skill sets /tmp/critique-loop/<slug>)
 #      CRITIQUE_PHASE (plan | code | direct — label only) · CODEX_HOME (default: ~/.codex)
 #      CRITIQUE_MAX (stamp denominator: 32 default; 16 for direct mode)
@@ -68,30 +68,11 @@ codex_config() {  # codex_config <key>
     | head -1 | sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*(#.*)?$//; s/^"//; s/"$//'
 }
 
-# --- Effort: maximal tier ------------------------------------------------------------
-# rank on the known ladder; -1 = unknown tier (assumed newer than the ladder, trusted)
-effort_rank() {
-  case "$1" in
-    minimal) echo 0 ;; low) echo 1 ;; medium) echo 2 ;; high) echo 3 ;;
-    xhigh)   echo 4 ;; ultra) echo 5 ;; *) echo -1 ;;
-  esac
-}
-
-if [ -z "${CODEX_EFFORT:-}" ]; then
-  CFG_EFFORT="$(codex_config model_reasoning_effort)"
-  if [ -n "$CFG_EFFORT" ]; then
-    CR="$(effort_rank "$CFG_EFFORT")"
-    XR="$(effort_rank xhigh)"
-    # configured tier wins if it ranks >= xhigh, or is unknown (assumed newer/higher)
-    if [ "$CR" -lt 0 ] || [ "$CR" -ge "$XR" ]; then
-      CODEX_EFFORT="$CFG_EFFORT"
-    else
-      CODEX_EFFORT="xhigh"
-    fi
-  else
-    CODEX_EFFORT="xhigh"
-  fi
-fi
+# --- Effort: xhigh by default ---------------------------------------------------------
+# xhigh is the skill default (owner decision 2026-07-12): ultra's marginal critique
+# quality did not justify its wall-clock/cost in practice. The codex config's
+# model_reasoning_effort is deliberately not consulted; CODEX_EFFORT pins any tier.
+CODEX_EFFORT="${CODEX_EFFORT:-xhigh}"
 
 # --- Provenance: resolve exactly which Codex produces this critique ------------------
 CLI_VERSION="$(codex --version 2>/dev/null | head -1 | awk '{print $NF}')"
