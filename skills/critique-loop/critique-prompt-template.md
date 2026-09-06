@@ -1,4 +1,4 @@
-# Critique prompt templates (v2)
+# Critique prompt templates (v3)
 
 Fill the `<…>` placeholders and write the result to `$CRITIQUE_LOOP_DIR/prompt-<N>.txt`
 before running `critique-loop-run.sh <N>`. Keep the `=== VERDICT ===` block exactly.
@@ -17,7 +17,16 @@ Pick the template by where you are:
 | **D** — direct critique | Direct mode, first call |
 
 The session persists across all `exec` calls of a run, so P/I/R build on each other —
-never re-paste what the critic has already seen; reference it.
+reference earlier context instead of re-pasting it. These templates work with either
+reviewer; the current host is always the programmer.
+
+Codex can run read-only Git commands. Claude Code has only Read, Glob, and Grep;
+the helper appends a pointer to `git-context-N.txt` containing the Git evidence.
+For implementation rounds, record `plan-sha` and use `CRITIQUE_PHASE=code` so the
+snapshot includes the complete implementation since approval. For external plans or
+artifacts outside the target directory and run buffer, include their contents in
+the prompt. Supply the programmer's verification results; the reviewer does not run
+tests that could write files.
 
 ## Shared verdict block
 
@@ -88,8 +97,11 @@ Do NOT modify any files — output a critique only.
 ## What to inspect
 - Approved plan: `<PLAN_FILE_PATH>`
 - Baseline: the plan was approved at commit `<PLAN_SHA>`.
-- Run `git log <PLAN_SHA>..HEAD --oneline` and `git diff <PLAN_SHA>` (this includes
-  uncommitted changes), then read the changed files.
+- Inspect `git log <PLAN_SHA>..HEAD --oneline` and `git diff <PLAN_SHA>` (this includes
+  uncommitted changes), then read the changed files. Codex can run these commands;
+  Claude Code reads the helper-supplied Git snapshot. Inspect relevant untracked
+  files listed in the status too; they are not included in the tracked diff.
+- Verification already performed by the programmer: <commands and actual results>.
 
 ## Convergence criteria for the IMPLEMENTATION (the loop stops when these are met)
 <the agreed implementation criteria, verbatim>
@@ -133,8 +145,9 @@ You are the CRITIC in a critique loop. Do NOT modify any files — output a crit
 
 ## What to inspect
 <pick one:>
-- The uncommitted changes in this repo. Diff below (for large diffs, omit and run
-  `git diff` yourself — you have read access):
+- The staged, unstaged, and untracked changes in this repo. Diff below (for large
+  diffs, Codex can use `git diff`, `git diff --cached`, and `git status --short`;
+  Claude Code reads the helper-supplied Git snapshot). Read relevant untracked files:
   ```diff
   <paste `git diff` for small/medium changes>
   ```

@@ -1,67 +1,145 @@
 ---
 name: critique-loop
-description: 'A task-first cross-model critique-loop working mode with two loops in one session. On /critique-loop Claude proposes a brief (task, mode, convergence criteria) for the user to confirm or edit. Full mode — Claude drafts a plan (committed to docs/plans/<slug>.md by default) → Codex critiques the plan in a loop → user approves → Claude implements with conventional commits against a recorded baseline SHA → the SAME persistent Codex session critiques the diff in a loop. Each loop runs up to 16 rounds (32 total in full mode). Direct mode — do the task, then loop (small tasks, docs; 16 rounds). Codex critiques read-only at the maximal configured model and maximal effort (auto-resolved as the higher of the codex-config tier and xhigh — e.g. ultra on gpt-5.6-sol); Claude does all fixing; product/architecture findings are surfaced to the user via needs_human, never silently decided. Every iteration is visualized (severity table, convergence trajectory, provenance incl. session id); HTML dashboard; final report includes disagreements and user decisions. Not a PR review. Trigger with /critique-loop or "critique loop", "loop with codex", "converge with codex".'
+description: 'Task-first critique loop between Claude Code and Codex, in either direction. The active agent programs; the other reviews read-only in one persistent session. Codex reviews use GPT-6 Astra at max effort; Claude Code reviews use Fable 5.1 at max effort. Full mode converges a plan, gets user approval, then converges the implementation; direct mode reviews existing work. Includes checkable criteria, human decision gates, and a dashboard. Use for critique loop, loop with codex, loop with claude, or converge with either agent. Not a PR review.'
 ---
 
-# Critique Loop (v2)
+# Critique Loop (v3)
 
-A **working mode**, not a PR review. You (Claude) author and repair; **Codex is the
-independent second-model critic** — it runs **read-only and never edits**; **you apply
-every fix**. Two models converge on one artifact against user-confirmed criteria.
+A **working mode**, not a PR review. You, the agent running this skill, are the
+**programmer**: author and repair the work. The other CLI is the independent
+**reviewer**: it runs **read-only and never edits**. You apply every fix.
+
+| Programmer (current host) | Reviewer | Pinned review model | Effort |
+|---|---|---|---|
+| Claude Code | Codex CLI | `gpt-6-astra` (GPT-6 Astra) | `max` |
+| Codex | Claude Code CLI | `claude-fable-5-1` (Fable 5.1) | `max` |
+
+Set `CRITIQUE_PROGRAMMER=claude` in Claude Code or `CRITIQUE_PROGRAMMER=codex`
+in Codex on **every helper call**; the helper chooses the opposite reviewer.
+It also recognizes `CODEX_THREAD_ID` / `CLAUDECODE` when called without an explicit
+role, and preserves the original Codex-reviewer default when neither is present.
+If both host markers are present, specify the programmer explicitly.
+These settings select the **reviewer**; they do not change the active programmer's model.
 
 Two modes, chosen at intake:
 
 - **full** (default for code changes and anything serious) — two loops in one session:
-  **plan loop** → **user approval gate** → **implement loop**. One persistent Codex
+  **plan loop** → **user approval gate** → **implement loop**. One persistent reviewer
   session spans both loops, so the critic that approved the plan reviews the code and
   can catch drift from the approved plan.
 - **direct** (small tasks, standalone docs, work that already exists) — the classic
   single loop: do the task, then converge.
 
 ## Fixed parameters
-- **Critic:** OpenAI Codex CLI, **one persistent session per run** — the helper starts
-  it on the first `exec` call and resumes it on every later call (`session-id` file is
-  auto-managed). **Model = the maximal model available to you** — inherits Codex's
-  configured default (auto-upgrades when your default does; `CODEX_MODEL=` pins one).
-  **Effort = `xhigh` by default** (owner decision 2026-07-12: ultra's marginal
-  critique quality did not justify its wall-clock and cost; the codex config's
-  `model_reasoning_effort` is deliberately not consulted). `CODEX_EFFORT=` pins any
-  tier explicitly (e.g. `ultra` for an especially high-stakes run). Preview what will
-  run: `~/.claude/skills/critique-loop/critique-loop-run.sh info`. The helper prints
-  and stamps *provenance* (exact CLI version + effective model + effort + session
-  state) — always surface it.
+- **One persistent reviewer session per run.** The helper starts it on the first
+  `exec` call and resumes its exact ID on every later call. Codex uses `exec resume`;
+  Claude Code uses `--resume`. `session-id` and `run-config.json` are auto-managed.
+  The latter locks the programmer, reviewer, model, effort, mode, and working directory.
+  Reuse the same values throughout both loops; do not share a run directory between runs.
+  The reported downgrade procedure below is the exception: it starts a fresh session
+  and re-seeds the accepted context instead of silently changing the existing reviewer.
+- **Pinned defaults:** GPT-6 Astra + `max` for Codex; Fable 5.1 + `max` for Claude Code.
+  `max` is the literal CLI effort value. User config defaults do not select the model
+  or effort. Explicit alternatives use `CODEX_MODEL` / `CODEX_EFFORT` or
+  `CLAUDE_MODEL` / `CLAUDE_EFFORT`, only when the user requests them and before a run
+  starts, or for the authorized downgrade sequence below.
+  `CRITIQUE_REVIEWER=codex|claude` is an alternative to setting the programmer;
+  if both are set they must name different agents. Preview with `info` (below).
+- **Read-only review:** Codex uses `sandbox_mode="read-only"` on start and resume.
+  Claude Code uses `--safe-mode`, only `Read,Glob,Grep`, and disabled MCP tools;
+  customizations and hooks are disabled. It has no shell or editing tools. The helper
+  supplies `git-context-N.txt` with status, tracked diff (staged and unstaged), and
+  the baseline commit log. The reviewer can read untracked files listed in the status.
+  For code rounds, the baseline comes from `plan-sha`; `REVIEW_BASE` can select a ref
+  explicitly. The programmer runs all tests and supplies their results in the prompt.
+- **Provenance:** surface the reviewer CLI version, requested model and effort,
+  session state, and any observed model usage returned by the CLI. A CLI error,
+  unexpected model, or lost session is a failed pass, never a converged verdict.
 - **Max rounds: 16 per loop** — plan loop ≤ 16 and implement loop ≤ 16 (up to 32 total
   in full mode; direct mode ≤ 16). Buffer files are numbered **continuously** across
   the run (`prompt-1 … prompt-32`); rounds are counted per loop. Stop the instant the
   criteria are met — don't over-polish.
-- **Codex is read-only; Claude does all fixes.** Never change the model, effort, or
+- **The reviewer is read-only; the programmer does all fixes.** Never change the model, effort, or
   mode to coerce a different verdict.
 
-## Setup (first use only)
+## Downgrades: report first, effort first
+
+Do not accept an automatic model substitution. The helper passes
+`switchModelsOnFlag: false` and an empty `fallbackModel` chain to Claude Code on
+every call; in non-interactive mode a flagged request ends with a refusal instead
+of silently switching. It also checks the models reported in `modelUsage` and
+rejects a substituted or unidentified reviewer, even if its output says converged.
+**Never accept Opus 4.8**, whether suggested by the CLI or found in a returned result.
+
+When a model or effort downgrade is needed, use this owner-authorized sequence:
+
+| Reviewer | Initial request | First retry | Second retry |
+|---|---|---|---|
+| Codex | GPT-6 Astra `max` | **GPT-6 Astra `xhigh`** | Stop and report; no model downgrade authorized |
+| Claude Code | Fable 5.1 `max` | **Fable 5.1 `xhigh`** | **Opus 5 `xhigh`** (`claude-opus-5`) |
+
+1. **Report before retrying:** the requested model/effort, the actual error or proposed
+   substitution, that its output was rejected, and the exact next settings. The
+   sequence above is already authorized; do not ask for permission again for these steps.
+2. Only advance after the preceding settings failed or were reported unavailable;
+   do not skip the effort reduction. Set `CODEX_EFFORT=xhigh`, or
+   `CLAUDE_EFFORT=xhigh`, keeping the original model first. If Fable 5.1 at `xhigh`
+   also fails, set `CLAUDE_MODEL=claude-opus-5 CLAUDE_EFFORT=xhigh`.
+3. Use a **fresh run directory** (e.g. `<slug>-astra-xhigh`, `<slug>-fable-xhigh`,
+   `<slug>-opus5-xhigh`), preserving the failed run's buffers. Copy `plan-sha` when
+   present, and provide a complete first prompt with the task, criteria, approved
+   plan, user decisions, accepted findings, and current changes. Do not reuse a
+   rejected reviewer response as accepted context. Session continuity restarts
+   explicitly; retain the overall round counts and log the change as an amendment.
+4. Record every downgrade and its reason in the dashboard and final provenance.
+   Stop after the last allowed step fails. Auth, network, permission, or safety
+   failures need their own resolution; this ladder is not a way around a refusal
+   or a permission denial. Never enable permission bypass or automatic fallback.
+
+The helper reports the next allowed settings after a failed pass, but **never
+performs the downgrade itself**. See the official
+[Claude Code fallback behavior](https://code.claude.com/docs/en/model-config#ask-before-switching).
+
+## Setup and execution
+Requires Python 3.9+ (standard library only) and an authenticated reviewer CLI.
+Use a current Codex CLI with GPT-6 Astra access, or Claude Code **2.1.255+** with
+Fable 5.1 access and the `--safe-mode` flag. If the selected model or effort is
+unavailable, report the CLI error; do not downgrade silently.
+
+Resolve `<skill-dir>` to the directory containing **this loaded SKILL.md**. It may
+be under `~/.claude/skills`, `~/.agents/skills`, `~/.codex/skills`, or a repo checkout.
+Invoke the shell entry point with `bash`; no executable-bit setup is required.
+The entry point calls the adjacent `critique-loop-run.py`, so keep both files together.
+
+Preview the two directions without making a model request:
 ```bash
-chmod +x ~/.claude/skills/critique-loop/critique-loop-run.sh
+CRITIQUE_PROGRAMMER=claude bash "<skill-dir>/critique-loop-run.sh" info
+CRITIQUE_PROGRAMMER=codex bash "<skill-dir>/critique-loop-run.sh" info
 ```
 
-## Bash execution rules
-- Run each command as a **separate** Bash invocation (no `&&` / `;`) so failures stay
-  visible. Exception: the `git rev-parse … > plan-sha` baseline capture is one command.
-- **Timeout: pass `timeout: 600000`** (the 10-min cap) on every critique call. At
-  max effort a large artifact can exceed it; if so, launch the helper with
-  `run_in_background: true` and read the buffer when you're re-invoked on completion.
+- Run each helper call as a separate shell invocation so failures stay visible.
+- **In Claude Code:** use Bash with `timeout: 600000`. For longer critiques, use
+  `run_in_background: true` and read the buffer when the process completes.
+- **In Codex:** start with `exec_command` and a short `yield_time_ms`; retain its
+  process `session_id` and poll with `write_stdin` until it exits. A running process
+  is not a failed critique. Keep the user informed while waiting and never launch
+  a duplicate call merely because the tool yielded before completion.
 - **Buffers are per-run:** prefix **every** helper call with
-  `CRITIQUE_LOOP_DIR=/tmp/critique-loop/<slug>` (env does not persist between Bash
-  calls). `<slug>` = current git branch name, else a kebab-case id from the task.
+  `CRITIQUE_PROGRAMMER=<programmer> CRITIQUE_LOOP_DIR=/tmp/critique-loop/<slug>`
+  (env does not persist between calls). Replace `<programmer>` with `claude` or
+  `codex` from the table. `<slug>` = a filesystem-safe branch/task ID unique to this run.
   Buffers live under `/tmp`, **never inside the repo**.
 - Reusing a slug from an earlier run? Run
-  `CRITIQUE_LOOP_DIR=/tmp/critique-loop/<slug> ~/.claude/skills/critique-loop/critique-loop-run.sh reset`
-  first — it clears stale buffers **and the old session id**.
+  `CRITIQUE_LOOP_DIR=/tmp/critique-loop/<slug> bash "<skill-dir>/critique-loop-run.sh" reset`
+  first — it clears stale buffers, **the old session ID, and its configuration**.
 
 ---
 
 ## Procedure
 
 ### Phase A — Intake (propose the brief, get confirmation)
-On `/critique-loop`, **do not start working yet.** Propose a short brief:
+On `/critique-loop` in Claude Code, `$critique-loop` in Codex, or an equivalent
+natural-language invocation, **do not start working yet.** Propose a short brief:
 
 1. **Task** — one or two concrete sentences, inferred from any argument after the
    command and the conversation. Nothing to infer → ask what to work on.
@@ -120,16 +198,16 @@ For each round (buffer/iteration number **N** keeps counting across the whole ru
    first iteration, **Template R** afterwards (see `critique-prompt-template.md`).
    Include the plan path, the task summary, the **plan criteria verbatim**, and (R)
    what changed since the last round.
-2. **Run Codex** (foreground, `timeout: 600000`):
+2. **Run the reviewer** using the host-specific execution rules above:
    ```bash
-   CRITIQUE_LOOP_DIR=/tmp/critique-loop/<slug> CRITIQUE_PHASE=plan ~/.claude/skills/critique-loop/critique-loop-run.sh N
+   CRITIQUE_PROGRAMMER=<programmer> CRITIQUE_LOOP_DIR=/tmp/critique-loop/<slug> CRITIQUE_PHASE=plan bash "<skill-dir>/critique-loop-run.sh" N
    ```
    The first call **starts the persistent session** — check the banner says
-   `session … (started)`. If it says `NOT captured`, tell the user and continue
-   stateless (degraded but valid).
+   `session … (started)`. A nonzero exit or missing session ID stops the loop;
+   inspect `raw-N.txt` and report the error before continuing.
 3. **Visualize** (see *Visualization*) before changing anything.
 4. **Classify every finding** before touching the plan:
-   - **Claude-resolvable** — missing edge case / error path, unclear or mis-ordered
+   - **Programmer-resolvable** — missing edge case / error path, unclear or mis-ordered
      steps, wrong paths or names, missing verification, a simpler alternative that
      preserves the user's goal, in-task scope trim → fix in the plan.
    - **needs-human** — product decisions, architecture tradeoffs with no clear right
@@ -200,7 +278,7 @@ Same cycle as F2, with these changes:
 
 ## DIRECT MODE (the classic loop)
 **Phase 0 — do the task** to best first-pass quality. Leave code changes
-**uncommitted** (so diffs and `codex review --uncommitted` can see them); for a
+**uncommitted** (so the reviewer can inspect the diff); for a
 document, just write the file. Then loop rounds 1 … 16 exactly as in F2 —
 **Template D** first, **Template R** after, `CRITIQUE_PHASE=direct` and
 `CRITIQUE_MAX=16` on helper calls, same session persistence, classification (incl.
@@ -208,9 +286,10 @@ needs-human pauses), visualization, convergence, and project checks each iterati
 Do not commit unless the user asks.
 
 Helper `review` mode (`critique-loop-run.sh N review`) remains available for pure
-code-diff runs — it invokes Codex's purpose-built reviewer, but it is **stateless**
-(no session). Prefer `exec` when continuity matters. `REVIEW_BASE=<ref>` switches it
-from `--uncommitted` to `--base <ref>`.
+code-diff runs **when the reviewer is Codex** — it invokes Codex's purpose-built
+reviewer, but it is **stateless** (no session). Prefer `exec` when continuity matters.
+`REVIEW_BASE=<ref>` selects a base ref instead of the default uncommitted scope.
+Claude Code reviews always use `exec`.
 
 ---
 
@@ -221,21 +300,25 @@ from `--uncommitted` to `--base <ref>`.
   fixes → stop early and report.
 - **Oscillating critic** (flip-flops between rounds) → don't thrash. Document both
   opinions, mark resolved, ignore thereafter:
-  `NOTE(critique-loop): Codex oscillated. Iter N said X; iter M said Y. Keeping <choice> because …`
+  `NOTE(critique-loop): Reviewer oscillated. Iter N said X; iter M said Y. Keeping <choice> because …`
 - **Disagreements** → `TODO(critique-loop):` note + ledger; **reported in the final
   summary even if empty**.
-- Missing `=== VERDICT ===` **twice in a row** → surface the raw output, stop.
+- Missing `=== VERDICT ===` → the pass fails; surface the raw output. If a corrected
+  prompt still yields no verdict on the next attempt, stop.
 - Helper / CLI failure (auth expired, network, crash) → report the exact error; do not
   retry blindly.
-- `session-id` empty after the first call → tell the user; continue stateless.
+- Missing or changed session ID → stop and report; do not silently restart stateless.
+- Run configuration mismatch → use a fresh run directory or reset intentionally;
+  never send a Codex session ID to Claude Code, or vice versa.
 - The user's answer to a surfaced question is itself ambiguous → re-ask before resuming.
 
 ## Visualization (every iteration + version)
-Always render, right after running Codex:
+Always render, right after running the reviewer:
 
 **1 — Provenance line** (from the helper's banner — includes the session state):
 ```
-🤖 codex 0.144.1 · model gpt-5.6-sol · effort ultra · session 019f…a4d3 (resumed) — iter 3/32 · plan round 2/16
+🤖 codex 0.153.4 · model gpt-6-astra · effort max · session 019f…a4d3 (resumed) — iter 3/32 · plan round 2/16
+🤖 claude 2.1.263 · model claude-fable-5-1 · effort max · session 019f…b5e4 (resumed) — iter 3/32 · plan round 2/16
 ```
 
 **2 — Findings** as a severity-badged table (🔴 blocking · 🟠 major · 🟡 minor · ⚪ nit),
@@ -262,11 +345,12 @@ Then one line: are the current criteria met, and why / why not.
 Maintain the HTML dashboard from `dashboard-template.html`:
 1. Copy the template to `/tmp/critique-loop/<slug>/dashboard.html` and **overwrite the
    `RUN` object** with the run's real data (task, criteria, operator "vmt29", mode,
-   codex {version, model, effort, session}, outcome, convergedAt, `gateAfter` = last
+   programmer ("Claude Code" or "Codex"), reviewer {cli, version, model, effort, session}
+   (`cli` is `codex` or `claude`), outcome, convergedAt, `gateAfter` = last
    plan iteration, iterations[] with `phase`, findings[] — resolution
    `user-decided` for needs-human items — amendments[]).
-2. To let the user **see it**: publish via the **Artifact** tool (hosted URL) — the
-   file is body-only and Artifact-ready — or `open` it locally.
+2. Link the local HTML file so the user can open it. If an Artifact tool is available
+   and publishing is authorized, it also accepts this body-only template.
 3. Update it at the end by default; refresh live each iteration if the user watches.
 
 ## After the loop — Final summary (always give this)
@@ -277,16 +361,17 @@ Concise and skimmable:
 - **Plan** — file path (and that it's committed, in repo mode), rounds, baseline
   `plan-sha` → final HEAD.
 - **User decisions** — every needs-human question surfaced and the user's answer.
-- **Disagreements with Codex** — every override: the finding, why you kept your
+- **Disagreements with the reviewer** — every override: the finding, why you kept your
   approach, where documented (`TODO(critique-loop)` / `NOTE(critique-loop)`), plus
   oscillations and how resolved. **Required even if empty.**
 - **Fixed** — findings addressed (file + one line each).
 - **Residual** — anything still open if not fully converged.
-- **Codex provenance** — version / model / effort / session id, and the dashboard link.
+- **Reviewer provenance** — version / model / effort / session id, and the dashboard link.
+  Include every rejected automatic substitution and each reported effort/model downgrade.
 
 ## How this differs from a PR review / other critique tools
 - **Two loops, one critic memory:** plan and implementation are separately converged,
-  but one persistent Codex session spans both — the code reviewer remembers what it
+  but one persistent reviewer session spans both — the code reviewer remembers what it
   approved and why.
 - **Interactive intake + living criteria:** the user confirms task, mode, and
   *checkable* convergence criteria up front and may amend them mid-session
@@ -297,7 +382,7 @@ Concise and skimmable:
   answers are first-class artifacts in the gate and the final report.
 - **Visualized + versioned:** severity trajectory, provenance with session id, HTML
   dashboard, and a required disagreements section.
-- **Clean separation:** Codex critiques (read-only), Claude fixes.
+- **Clean separation:** the opposite agent critiques (read-only); the programmer fixes.
 - **Not a PR review.** The loop ends with a branch ready for a PR; the PR reviewer
   should be a *fresh-eyes* bot in CI (it has no shared context with this session),
   with a babysit-style skill handling its comments. Out of scope here.

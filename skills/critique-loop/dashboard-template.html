@@ -1,6 +1,6 @@
 <!--
   critique_loop dashboard — body-only (Artifact-ready) and also openable locally in a browser.
-  Claude: overwrite the RUN object below with the real run's data, then either publish via the
+  Programmer (Claude Code or Codex): overwrite the RUN object below with the real run's data, then either publish via the
   Artifact tool (hosted URL) or `open` the file locally. Ships with sample data as a live demo.
 -->
 <style>
@@ -256,12 +256,15 @@
 </div>
 
 <script>
-/* ============================ RUN DATA — Claude overwrites this ============================ */
+/* ============================ RUN DATA — the programmer overwrites this ============================ */
 const RUN = {
   task: "Refactor auth token validation to be fully async",
   criteria: "No blocking or major findings remain, and the test suite passes.",
   mode: "full",                   // full | direct (optional)
-  codex: { version: "0.142.5", model: "gpt-5.5", effort: "xhigh", session: "019f51ed…a4d3" },
+  programmer: "Claude Code",      // Claude Code | Codex
+  reviewer: { cli: "codex", version: "0.153.4", model: "gpt-6-astra", effort: "max", session: "019f51ed…a4d3" },
+  // Reverse direction: programmer: "Codex",
+  // reviewer: { cli: "claude", version: "2.1.263", model: "claude-fable-5-1", effort: "max", session: "..." },
   operator: "vmt29",              // custom personal handle — NOT an official identifier
   operatorTag: "custom handle",
   outcome: "converged",           // converged | stuck | max | timeout
@@ -296,10 +299,14 @@ const SEV = [["blocking","--sev-blocking"],["major","--sev-major"],["minor","--s
 const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 function render(R){
+  // Existing v2 data can still use R.codex; new runs name the actual reviewer.
+  const reviewer = R.reviewer || {cli: "codex", ...R.codex};
+  const reviewerLabel = reviewer.cli === "claude" ? "Claude Code" : "Codex";
+  const programmer = R.programmer || "Claude Code";
   document.getElementById("task").textContent = R.task;
   document.getElementById("prov").innerHTML =
-    `codex <b>${esc(R.codex.version)}</b> · model <b>${esc(R.codex.model)}</b> · effort <b>${esc(R.codex.effort)}</b>`
-    + (R.codex.session ? ` · session <b>${esc(R.codex.session)}</b>` : "");
+    `reviewer ${esc(reviewerLabel)} <b>${esc(reviewer.version)}</b> · model <b>${esc(reviewer.model)}</b> · effort <b>${esc(reviewer.effort)}</b>`
+    + (reviewer.session ? ` · session <b>${esc(reviewer.session)}</b>` : "");
   if(R.operator){ document.getElementById("operator").textContent = R.operator; }
   if(R.operatorTag){ document.getElementById("operatorTag").textContent = R.operatorTag; }
 
@@ -309,7 +316,7 @@ function render(R){
     converged:["ok", `Converged at iteration ${R.convergedAt}`, `criteria met — ${R.criteria}`],
     stuck:["warn","Stopped early — stuck", `no further progress · ${R.criteria}`],
     max:["warn",`Hit the ${R.maxIterations}-iteration limit`, `not fully converged · ${R.criteria}`],
-    timeout:["crit","Codex timed out", `loop halted · ${R.criteria}`]
+    timeout:["crit",`${reviewerLabel} timed out`, `loop halted · ${R.criteria}`]
   }[R.outcome] || ["warn","In progress", R.criteria];
   document.getElementById("banner").outerHTML =
     `<div class="banner ${bmap[0]}"><span class="dot"></span><span><b>${esc(bmap[1])}.</b> <span class="crit-text">${esc(bmap[2])}</span></span></div>`;
@@ -326,7 +333,7 @@ function render(R){
   document.getElementById("kpis").innerHTML = [
     `<div class="kpi"><div class="label">Outcome</div><div class="val ${oc}">${esc(ocLabel)}</div><div class="sub">${R.outcome==="converged"?"iteration "+R.convergedAt:"—"}</div></div>`,
     `<div class="kpi"><div class="label">Iterations</div><div class="val">${R.iterations.length}<span style="color:var(--faint)"> / ${R.maxIterations}</span></div><div class="sub">of ${R.maxIterations} max</div></div>`,
-    `<div class="kpi"><div class="label">Findings fixed</div><div class="val">${fixed}<span style="color:var(--faint)"> / ${R.findings.length}</span></div><div class="sub">applied by Claude</div></div>`,
+    `<div class="kpi"><div class="label">Findings fixed</div><div class="val">${fixed}<span style="color:var(--faint)"> / ${R.findings.length}</span></div><div class="sub">applied by ${esc(programmer)}</div></div>`,
     `<div class="kpi"><div class="label">Blocking + major left</div><div class="val ${remain===0?"ok":"crit"}">${remain}</div><div class="sub">at last pass</div></div>`
   ].join("");
 
@@ -357,8 +364,8 @@ function render(R){
      </tr>`).join("");
 
   document.getElementById("foot").innerHTML =
-    `<span>✦ signed · <b style="color:var(--accent)">${esc(R.operator||"—")}</b> <span style="opacity:.7">(${esc(R.operatorTag||"custom")})</span> · Codex read-only · Claude fixes${R.mode?` · mode ${esc(R.mode)}`:""}</span>` +
-    `<span>codex ${esc(R.codex.version)} · ${esc(R.codex.model)} · ${esc(R.codex.effort)} · ${esc(R.generatedAt||"")}</span>`;
+    `<span>✦ signed · <b style="color:var(--accent)">${esc(R.operator||"—")}</b> <span style="opacity:.7">(${esc(R.operatorTag||"custom")})</span> · ${esc(reviewerLabel)} read-only · ${esc(programmer)} fixes${R.mode?` · mode ${esc(R.mode)}`:""}</span>` +
+    `<span>${esc(reviewer.cli)} ${esc(reviewer.version)} · ${esc(reviewer.model)} · ${esc(reviewer.effort)} · ${esc(R.generatedAt||"")}</span>`;
 }
 
 function buildChart(R){
