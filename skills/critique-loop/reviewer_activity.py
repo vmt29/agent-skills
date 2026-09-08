@@ -33,7 +33,9 @@ def error_kind(value, status=None):
     except (TypeError, ValueError):
         status = None
     lower = text.lower()
-    if status == 429 or "rate_limit" in lower or "ratelimiterror" in lower:
+    if "stream ended" in lower or "no content blocks" in lower:
+        kind = "stream_failure"
+    elif status == 429 or "rate_limit" in lower or "ratelimiterror" in lower:
         kind = "rate_limit"
     elif status in (401, 403) or "authentication_error" in lower or "authenticationerror" in lower:
         kind = "authentication_or_permission"
@@ -192,9 +194,14 @@ class ActivityMonitor:
 
     def diagnostic_line(self, line):
         # Only recognize diagnostic error/retry markers, never quote the raw line.
-        if re.search(r"API Error:|API error|API request failed|APIConnectionError|APITimeoutError|Error in streaming|overloaded_error|rate_limit_error", line, re.I):
+        was_fallback = self.last_activity == "nonstreaming fallback"
+        if re.search(r"API Error:|API error|API request failed|APIConnectionError|APITimeoutError|Error (?:in |during )?streaming|Stream ended without|no content blocks completed|overloaded_error|rate_limit_error", line, re.I):
             self.api_error(line)
-        if re.search(r"\bretrying\b|\bretry attempt\b", line, re.I):
+        if "non-streaming" in line.lower() and re.search(r"falling back|triggering", line, re.I):
+            if not was_fallback:
+                self.counts["retries"] += 1
+            self.activity("nonstreaming fallback")
+        elif re.search(r"\bretrying\b|\bretry attempt\b", line, re.I):
             self.counts["retries"] += 1
             self.activity("API retry")
 

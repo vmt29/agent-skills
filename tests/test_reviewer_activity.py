@@ -190,6 +190,15 @@ class ActivityMonitorTests(unittest.TestCase):
         self.assertEqual("server_or_overload", snapshot["last_api_error"]["kind"])
         self.assertNotIn("private provider body", json.dumps(snapshot))
 
+    def test_empty_stream_and_nonstreaming_fallback_are_visible(self):
+        self.monitor.diagnostic_line('[ERROR] Stream completed with message_start but no content blocks completed - triggering non-streaming fallback')
+        self.monitor.diagnostic_line('[ERROR] Error streaming, falling back to non-streaming mode: Stream ended without receiving any events')
+        state = self.snapshot()
+        self.assertEqual(2, state["api_error_events"])
+        self.assertEqual(1, state["retries"], "two log lines describe one fallback")
+        self.assertEqual("stream_failure", state["last_api_error"]["kind"])
+        self.assertEqual("nonstreaming fallback", state["last_activity"])
+
     def test_debug_api_error_and_retry_are_consumed_once(self):
         self.debug("[DEBUG] API request failed: API Error: 429 private provider response\n")
         self.debug("[DEBUG] Retrying request in 3 seconds\n")
