@@ -249,11 +249,25 @@ def run(args):
     else:
         context, repo = claude_context(target, buf, iteration, base)
         prompt += context
+        claude_settings = {"switchModelsOnFlag": False, "fallbackModel": []}
+        # Claude settings.env wins over inherited env; preserve explicit per-call overrides.
+        settings_env = {
+            name: os.environ[name]
+            for name in (
+                "API_FORCE_IDLE_TIMEOUT", "API_TIMEOUT_MS",
+                "CLAUDE_ENABLE_BYTE_WATCHDOG", "CLAUDE_ENABLE_STREAM_WATCHDOG",
+                "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS", "CLAUDE_STREAM_IDLE_TIMEOUT_MS",
+                "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
+            )
+            if name in os.environ
+        }
+        if settings_env:
+            claude_settings["env"] = settings_env
         command = [
             "claude", "--print", "--model", model, "--effort", effort,
             "--output-format", "stream-json", "--verbose", "--include-partial-messages",
             "--debug", "api", "--debug-file", str(diagnostic_file), "--safe-mode",
-            "--settings", json.dumps({"switchModelsOnFlag": False, "fallbackModel": []}),
+            "--settings", json.dumps(claude_settings),
             "--tools", "Read,Glob,Grep", "--allowedTools", "Read,Glob,Grep",
             "--disallowedTools", "mcp__*", "--permission-mode", "dontAsk",
             "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',

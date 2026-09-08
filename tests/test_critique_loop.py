@@ -218,6 +218,37 @@ class RunnerTests(unittest.TestCase):
         for evidence in ("+staged", "+unstaged", "new.txt"):
             self.assertIn(evidence, snapshot)
 
+    def test_claude_settings_preserve_only_explicit_connection_overrides(self):
+        overrides = {
+            "API_FORCE_IDLE_TIMEOUT": "0",
+            "API_TIMEOUT_MS": "900000",
+            "CLAUDE_ENABLE_BYTE_WATCHDOG": "false",
+            "CLAUDE_ENABLE_STREAM_WATCHDOG": "false",
+            "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS": "600000",
+            "CLAUDE_STREAM_IDLE_TIMEOUT_MS": "600000",
+            "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "",
+        }
+        for name in overrides:
+            self.env.pop(name, None)
+        unrelated = {
+            "ANTHROPIC_AUTH_TOKEN": "fake-secret-token",
+            "ANTHROPIC_API_KEY": "fake-secret-key",
+            "UNRELATED_ENV": "not-a-reviewer-override",
+        }
+        self.assert_ok(self.call(CRITIQUE_PROGRAMMER="codex", **unrelated))
+        args = self.calls()[0]["args"]
+        settings = json.loads(args[args.index("--settings") + 1])
+        self.assertEqual(settings, {"switchModelsOnFlag": False, "fallbackModel": []})
+
+        self.assert_ok(self.call("2", CRITIQUE_PROGRAMMER="codex", **overrides, **unrelated))
+        args = self.calls()[1]["args"]
+        settings = json.loads(args[args.index("--settings") + 1])
+        self.assertEqual(settings, {
+            "switchModelsOnFlag": False, "fallbackModel": [], "env": overrides,
+        })
+        for value in unrelated.values():
+            self.assertNotIn(value, " ".join(args))
+
     def test_claude_handles_unborn_repository(self):
         self.repo = self.root / "unborn"
         self.repo.mkdir()
