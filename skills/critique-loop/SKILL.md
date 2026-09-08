@@ -53,8 +53,11 @@ Two modes, chosen at intake:
   For code rounds, the baseline comes from `plan-sha`; `REVIEW_BASE` can select a ref
   explicitly. The programmer runs all tests and supplies their results in the prompt.
 - **Provenance:** surface the reviewer CLI version, requested model and effort,
-  session state, and any observed model usage returned by the CLI. A CLI error,
+  session state, and any observed model usage returned by the CLI. A terminal CLI error,
   unexpected model, or lost session is a failed pass, never a converged verdict.
+- **Live monitoring:** check reviewer activity and API errors at least every
+  **60 seconds** until it exits. Base every user-facing status on a fresh check,
+  with its timestamp and current elapsed time; never recycle an earlier estimate.
 - **Max rounds: 16 per loop** — plan loop ≤ 16 and implement loop ≤ 16 (up to 32 total
   in full mode; direct mode ≤ 16). Buffer files are numbered **continuously** across
   the run (`prompt-1 … prompt-32`); rounds are counted per loop. Stop the instant the
@@ -118,8 +121,9 @@ CRITIQUE_PROGRAMMER=codex bash "<skill-dir>/critique-loop-run.sh" info
 ```
 
 - Run each helper call as a separate shell invocation so failures stay visible.
-- **In Claude Code:** use Bash with `timeout: 600000`. For longer critiques, use
-  `run_in_background: true` and read the buffer when the process completes.
+- **In Claude Code:** start long reviewer calls with `run_in_background: true`
+  and monitor them every minute until completion. Do not let a short frontend
+  timeout terminate an otherwise healthy reviewer.
 - **In Codex:** start with `exec_command` and a short `yield_time_ms`; retain its
   process `session_id` and poll with `write_stdin` until it exits. A running process
   is not a failed critique. Keep the user informed while waiting and never launch
@@ -132,6 +136,57 @@ CRITIQUE_PROGRAMMER=codex bash "<skill-dir>/critique-loop-run.sh" info
 - Reusing a slug from an earlier run? Run
   `CRITIQUE_LOOP_DIR=/tmp/critique-loop/<slug> bash "<skill-dir>/critique-loop-run.sh" reset`
   first — it clears stale buffers, **the old session ID, and its configuration**.
+
+### Reviewer activity and API errors — required
+
+The helper uses Claude's `stream-json` output with partial-message events and
+API diagnostics. It prints a fresh heartbeat at least once per minute, reports
+API error events immediately, and updates `$CRITIQUE_LOOP_DIR/status.json`
+while the process runs. The adjacent `reviewer_activity.py` is part of the helper;
+keep it with `critique-loop-run.py` when moving or copying the skill.
+
+Poll the running tool/process at least every 60 seconds. Immediately before
+answering a status question, request a fresh status:
+
+```bash
+CRITIQUE_PROGRAMMER=<programmer> CRITIQUE_LOOP_DIR=/tmp/critique-loop/<slug> \
+  bash "<skill-dir>/critique-loop-run.sh" status
+```
+
+Report the checked-at time, process liveness, elapsed time, age/type of the last
+observable activity, and whether API errors or retries have appeared. The status
+command recalculates ages at query time and marks a running monitor stale after
+60 seconds without an update. A stale monitor is not proof that the reviewer is
+dead: inspect the actual process and fresh raw/API logs before drawing conclusions.
+Distinguish tool errors (such as a missing file) from API/auth/network failures.
+
+**Silence is not failure.** Single-result JSON can stay empty until the entire
+review ends; even a live stream may pause during a long model request. Thinking
+events, tool activity, output growth, and API retries are evidence of activity.
+If none is visible, report that the process is alive with no recent observable
+output. Do not claim it is actively thinking, kill it, restart it, or downgrade
+its effort solely because time has elapsed or the result file is empty.
+
+When an actual API error occurs, identify its category/status and investigate:
+allow an already-running CLI retry to finish; for transient rate limits, server
+errors, or connection timeouts, honor backoff/Retry-After and retry the same model,
+effort, and session after the failed process has exited. Resolve authentication,
+permission, network, or configuration faults through their appropriate mechanism;
+model downgrades do not fix those. Preserve failed buffers, use the next iteration
+number, and never start a duplicate live reviewer. If the same error survives two
+manual retries without a new diagnosis or fix, stop retrying and report the concrete
+blocker. Only use the separate downgrade sequence for an evidenced model/effort
+availability problem or an explicit user request.
+
+If an API failure precedes the first validated verdict, the observed session ID
+is in the live status/init event. Verify it against that run's configuration before
+resuming it; an observed ID does not by itself validate a review or its model.
+
+Summarize observable activity rather than exposing private reasoning. Raw streams
+and `api-N.log` may contain private text or credentials: do not paste them into
+chat or the dashboard. The helper's status contains only counters, timestamps,
+safe error categories, and model/session metadata. A progress heartbeat is not a
+verdict; normal session/model checks and convergence criteria still apply.
 
 ---
 

@@ -11,6 +11,8 @@ import subprocess
 import sys
 from uuid import UUID
 
+from reviewer_activity import format_status, refresh_status, run_monitored
+
 
 DEFAULTS = {
     "codex": ("gpt-6-astra", "max"),
@@ -173,6 +175,14 @@ def run(args):
     if args.iteration == "reset":
         reset(buf)
         return 0
+    if args.iteration == "status":
+        status_file = buf / "status.json"
+        if not status_file.is_file():
+            fail("no live status at %s" % status_file)
+        status = refresh_status(json.loads(status_file.read_text()))
+        print(format_status(status))
+        print(json.dumps(status, indent=2))
+        return 1 if status["stale"] else 0
 
     programmer, reviewer = roles(os.environ)
     model = os.environ.get(reviewer.upper() + "_MODEL") or DEFAULTS[reviewer][0]
@@ -201,6 +211,8 @@ def run(args):
     if not prompt_file.is_file():
         fail("no prompt at %s; the programmer must write it first" % prompt_file)
     prompt = READ_ONLY_PROMPT + "\n\n" + prompt_file.read_text()
+    # Streaming/debug output can contain private prompts or provider diagnostics.
+    buf.chmod(0o700)
     config_file = buf / "run-config.json"
     session_file = buf / "session-id"
     config = dict(programmer=programmer, reviewer=reviewer, model=model, effort=effort,
@@ -215,6 +227,8 @@ def run(args):
     base = review_base(target, buf, phase)
     out_file = buf / ("critique-%s.md" % iteration)
     raw_file = buf / ("raw-%s.txt" % iteration)
+    diagnostic_file = buf / ("api-%s.log" % iteration)
+    diagnostic_file.unlink(missing_ok=True)
     body_file = buf / (".body-%s.txt" % iteration)
     body_file.unlink(missing_ok=True)  # A failed retry must never reuse an old verdict.
 
@@ -237,7 +251,8 @@ def run(args):
         prompt += context
         command = [
             "claude", "--print", "--model", model, "--effort", effort,
-            "--output-format", "json", "--safe-mode",
+            "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+            "--debug", "api", "--debug-file", str(diagnostic_file), "--safe-mode",
             "--settings", json.dumps({"switchModelsOnFlag": False, "fallbackModel": []}),
             "--tools", "Read,Glob,Grep", "--allowedTools", "Read,Glob,Grep",
             "--disallowedTools", "mcp__*", "--permission-mode", "dontAsk",
@@ -251,9 +266,12 @@ def run(args):
     child_env = dict(os.environ)
     if reviewer == "claude":
         child_env["CLAUDE_CODE_EFFORT_LEVEL"] = effort
-    with raw_file.open("w") as raw:
-        result = subprocess.run(command, cwd=target, stdin=subprocess.DEVNULL,
-                                env=child_env, stdout=raw, stderr=subprocess.STDOUT)
+    print("Starting %s · %s · session %s" % (reviewer, provenance, sid or "new"), flush=True)
+    result = run_monitored(
+        command, target, child_env, raw_file, diagnostic_file if reviewer == "claude" else None,
+        buf / "status.json",
+        metadata=dict(iteration=iteration, reviewer=reviewer, model=model, effort=effort),
+    )
     raw_text = raw_file.read_text(errors="replace")
     body = raw_text
     note = "stateless (review mode)"
@@ -297,7 +315,7 @@ def run(args):
     except ValueError as error:
         problem = str(error)
         code = code or 1
-        body = "ERROR: %s\n\n%s" % (problem, raw_text)
+        body = "ERROR: %s\n\nPrivate raw diagnostics: %s\n" % (problem, raw_file)
         note = "FAILED" + (" · session " + sid if sid else "")
     finally:
         body_file.unlink(missing_ok=True)
@@ -316,7 +334,7 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("iteration", help="1..32, info, or reset")
+    parser.add_argument("iteration", help="1..32, info, status, or reset")
     parser.add_argument("mode", nargs="?", default="exec", choices=("exec", "review"))
     parser.add_argument("target_dir", nargs="?", default=os.getcwd())
     args = parser.parse_args()

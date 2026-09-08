@@ -48,6 +48,11 @@ are preserved. Permission denials and safety refusals are not downgrade triggers
 - **Visible results:** findings, convergence trajectory, CLI/model/effort/session
   provenance, and a dashboard that identifies both roles. The final report includes
   disagreements and user decisions.
+- **Fresh activity checks every minute:** streaming heartbeats show process liveness,
+  elapsed time, last activity, and API error/retry counts without exposing private
+  reasoning or credentials. Quiet output alone is not a reason to kill or downgrade
+  a reviewer. Diagnose actual API failures, then retry the same session after the
+  failed process exits; never launch a duplicate live reviewer.
 
 ### Requirements
 
@@ -73,8 +78,8 @@ ln -s "$(pwd)/agent-skills/skills/critique-loop" ~/.agents/skills/critique-loop
 ```
 
 If a destination already contains an installed copy, update that copy or replace
-its link deliberately. Keep the whole skill directory together, including both
-runner files. Invoke through `bash`; no chmod step is needed.
+its link deliberately. Keep the whole skill directory together, including the
+runner and `reviewer_activity.py`. Invoke through `bash`; no chmod step is needed.
 
 Preview each direction without making a model request:
 
@@ -98,6 +103,18 @@ User-requested overrides use `CODEX_MODEL` / `CODEX_EFFORT` or `CLAUDE_MODEL` /
 `CLAUDE_EFFORT`; use full model IDs. Set them before starting and keep them fixed
 throughout the run. Reset a reused buffer directory before starting a new run.
 
+While a reviewer is running, poll its process at least once per minute. For a
+fresh status query using the same run directory:
+
+```bash
+CRITIQUE_LOOP_DIR=/tmp/critique-loop/<slug> \
+  bash ~/.agents/skills/critique-loop/critique-loop-run.sh status
+```
+
+The helper updates `status.json` continuously and marks running snapshots stale
+after 60 seconds without an update. Raw streams and `api-N.log` are private
+diagnostics; status output contains only safe counters and metadata.
+
 ### Validation
 
 ```bash
@@ -106,7 +123,8 @@ python3 -m unittest discover -s tests -v
 
 Tests use local fake CLIs and real temporary Git repositories to check routing,
 model/effort flags, read-only tool restrictions, session continuity, Git evidence,
-and failure propagation without making model requests.
+failure propagation, live activity, API error classification, stale status, and
+supervisor cleanup without making model requests.
 
 ## Credits
 
